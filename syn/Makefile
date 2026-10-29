@@ -4,8 +4,11 @@ DEVICE  ?= --25k
 PACKAGE ?= CABGA256
 FREQ    ?= 250
 SEED    ?= 1
-RTL := ../rtl/eth_ip_udp_rx.sv ../rtl/moldudp64_framer.sv ../rtl/itch_decoder.sv \
-       ../rtl/itch_parser_top.sv syn_wrapper.sv
+# Synthesize another version: make clean && make DECODER=path/to/itch_decoder.sv
+RX      ?= ../rtl/eth_ip_udp_rx.sv
+FRAMER  ?= ../rtl/moldudp64_framer.sv
+DECODER ?= ../rtl/itch_decoder.sv
+RTL := $(RX) $(FRAMER) $(DECODER) ../rtl/itch_parser_top.sv syn_wrapper.sv
 
 all: report.txt
 
