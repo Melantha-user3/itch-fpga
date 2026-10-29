@@ -262,3 +262,30 @@ async def test_latency_and_throughput(dut):
         fh.write(f"messages {len(lat)}\nmin {min(lat)}\nmax {max(lat)}\n"
                  f"mean {statistics.mean(lat):.3f}\n"
                  f"beats_per_cycle {total_beats / in_cycles:.4f}\n")
+
+
+@cocotb.test()
+async def test_every_alignment(dut):
+    """Every pair of message types back to back, so blocks start and end in every lane
+    (including the length field split across two beats and a 50-byte message ending in lane 0)."""
+    from itch_model import ITCH_LEN
+    h = Harness(dut)
+    await h.start()
+    rng = random.Random(SEED + 6)
+    frames, seq, starts, ends = [], 1, set(), set()
+    for t1 in ITCH_LEN:
+        for t2 in ITCH_LEN:
+            msgs = [random_message(rng, [t1]), random_message(rng, [t2]), random_message(rng, [t1])]
+            frames.append(build_frame(build_mold(seq, msgs), PORT))
+            pos = 20
+            for m in msgs:
+                starts.add(pos % 8)
+                pos += 2 + len(m)
+                ends.add((pos - 1) % 8)
+            seq += 3
+    assert starts == set(range(8)) and ends == set(range(8))
+    exp, _ = expected_for(frames)
+    await h.send(frames)
+    await h.drain()
+    check(h, exp)
+    assert h.pkt_done == len(frames) and h.pkt_err == 0
