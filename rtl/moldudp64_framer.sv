@@ -61,14 +61,12 @@ module moldudp64_framer #(
     logic        end_q;       // this beat holds the block's last byte (bl == 0)
     logic [2:0]  end_lane;    // lane of the block's last byte
     logic [2:0]  ls_q;        // lane where the next block starts (after end_lane)
-    logic [2:0]  a_q;         // ls_q + 1
     logic [5:0]  blk_len;
     logic [5:0]  rel;         // where the message starts in the 64-byte window
     logic        more;        // more blocks to start after the current one
     logic        ps_valid;    // previous block ended in lane 7: next starts at lane 0
     logic [15:0] remaining;   // blocks not yet started
-    logic [15:0] len_full_q;  // last length field read, checked one beat later
-    logic        len_chk_q;
+    logic        len_bad_q;   // length read last beat was out of range
     logic [63:0] seq;         // sequence number of the next message
     logic [63:0] hist [7];    // hist[0] = previous beat, hist[6] = 7 beats ago
 
@@ -77,27 +75,53 @@ module moldudp64_framer #(
     endfunction
 
     // ------------------------------------------------------------ control
-    logic        end_now, emit, err, len_bad;
+    logic        end_now, emit, err;
     logic        start_here, len_ready;
     logic [2:0]  ls;          // lane where the next block starts
-    logic [2:0]  a;           // (lane of the length field) + 1, relative to this beat
     logic [15:0] len_val;
     logic [5:0]  end_rel;     // last byte of the block, counted from lane 0 of this beat
     logic [15:0] count;
+    logic [2:0]  sel;
 
     logic [1:0]  n_st;
-    logic        n_in_blk, n_len_pend, n_ps_valid, n_more, n_end_q, n_len_chk;
+    logic        n_in_blk, n_len_pend, n_ps_valid, n_more, n_end_q, n_len_bad;
     logic [7:0]  n_len_hi;
-    logic [2:0]  n_bl, n_end_lane, n_ls, n_a;
+    logic [2:0]  n_bl, n_end_lane, n_ls;
     logic [5:0]  n_blk_len, n_rel;
-    logic [15:0] n_remaining, n_len_full;
+    logic [15:0] n_remaining;
     logic [63:0] n_seq;
+
+    // Every lane where a length field can start gets its own adder, all
+    // working on the incoming data in parallel. Registers (st, len_pend,
+    // ls_q) then just pick one result, so no adder sits after the pick.
+    //   i = 0..6: length in lanes i and i+1; it starts at lane i, so the
+    //             block's last byte is at (i + 1) + len
+    //   i = 7:    split length (len_pend): high byte came last beat, low
+    //             byte is lane 0, so the last byte is at 0 + len
+    // The first block (st == ST_HDR) starts in lane 4, same as i = 4.
+    // When ls_q is 7 and len_pend is 0 the pick is unused (the block goes
+    // to len_pend instead).
+    logic [15:0] cand_len [8];   // length field if it starts in lane i
+    logic [5:0]  cand_end [8];   //   where that block would end (end_rel)
+    logic [5:0]  cand_rel [8];   //   where its message would sit in the window
+    logic        cand_bad [8];   //   length outside MIN_MSG..MAX_MSG
+    for (genvar i = 0; i < 8; i++) begin : g_cand
+        if (i < 7) begin : g_lane
+            assign cand_len[i] = {s_tdata[8*i +: 8], s_tdata[8*(i+1) +: 8]};
+            assign cand_end[i] = 6'(i + 1) + cand_len[i][5:0];
+        end else begin : g_split
+            assign cand_len[i] = {len_hi, s_tdata[7:0]};
+            assign cand_end[i] = cand_len[i][5:0];
+        end
+        assign cand_rel[i] = 6'd57 - cand_len[i][5:0] + {3'b000, cand_end[i][2:0]};
+        assign cand_bad[i] = cand_len[i] < 16'(MIN_MSG) || cand_len[i] > 16'(MAX_MSG);
+    end
 
     always_comb begin
         n_st = st; n_in_blk = in_blk; n_len_pend = len_pend; n_len_hi = len_hi;
-        n_bl = bl; n_end_q = end_q; n_end_lane = end_lane; n_ls = ls_q; n_a = a_q;
+        n_bl = bl; n_end_q = end_q; n_end_lane = end_lane; n_ls = ls_q;
         n_blk_len = blk_len; n_rel = rel; n_more = more; n_ps_valid = 1'b0;
-        n_remaining = remaining; n_len_full = len_full_q; n_len_chk = 1'b0;
+        n_remaining = remaining; n_len_bad = 1'b0;
         n_seq = seq;
         end_now = 1'b0; emit = 1'b0; err = 1'b0;
         start_here = 1'b0; ls = ls_q; len_ready = 1'b0;
@@ -105,8 +129,7 @@ module moldudp64_framer #(
         count = {lane(s_tdata, 2), lane(s_tdata, 3)};
 
         // Length read last beat out of range: give up on this packet
-        len_bad = len_chk_q && (len_full_q < 16'(MIN_MSG) || len_full_q > 16'(MAX_MSG));
-        if (len_bad) err = 1'b1;
+        if (len_bad_q) err = 1'b1;
 
         if (st == ST_HDR) begin
             // Fixed positions: seq = bytes 10-17, count = bytes 18-19, first block at 20
@@ -130,7 +153,7 @@ module moldudp64_framer #(
             // 1) The current block ends in this beat
             end_now = in_blk && end_q;
             if (end_now) begin
-                emit = s_tkeep[end_lane] && !len_bad;
+                emit = s_tkeep[end_lane] && !len_bad_q;
                 if (!s_tkeep[end_lane]) err = 1'b1;  // packet ended inside the message
                 n_seq = seq + 64'd1;
                 n_in_blk = 1'b0;
@@ -169,36 +192,23 @@ module moldudp64_framer #(
             end
         end
 
-        // The length value and its offset `a` are picked only by registers
-        // (st, len_pend, ls_q), never by this beat's decisions, so the mux
-        // can start as soon as the data arrives.
-        if (len_pend) begin
-            a       = 3'd0;                         // field started one byte before this beat
-            len_val = {len_hi, lane(s_tdata, 0)};
-        end else if (st == ST_HDR) begin
-            a       = 3'd5;                         // first block: length in lanes 4-5
-            len_val = {lane(s_tdata, 4), lane(s_tdata, 5)};
-        end else begin
-            a       = a_q;
-            len_val = {lane(s_tdata, 32'(ls_q)), lane(s_tdata, 32'(ls_q) + 1)};
-        end
+        sel     = len_pend ? 3'd7 : (st == ST_HDR ? 3'd4 : ls_q);
+        len_val = cand_len[sel];
 
-        // 4) Length known. Block = length field + message, so its last byte is
-        //    at end_rel = a + len (from lane 0 of this beat): k = end_rel/8 beats
-        //    later, lane end_rel%8. The message starts at a + 1, which in the
-        //    window of the end beat is a + 1 - 8*(k - 7) = 57 - len + end lane.
-        //    The range check on len happens next beat (len_bad).
+        // 4) Length known. The block's last byte is end_rel bytes from lane 0
+        //    of this beat: k = end_rel/8 beats later, lane end_rel%8. If the
+        //    length field starts at lane i, the message starts at i + 2, which
+        //    in the window of the end beat is i + 2 - 8*(k - 7) = 57 - len +
+        //    end lane. A bad length is acted on next beat (len_bad_q).
         if (len_ready) begin
-            end_rel    = {3'b000, a} + len_val[5:0];
+            end_rel    = cand_end[sel];
             n_bl       = end_rel[5:3] - 3'd1;      // >= 1 beat later since len >= 12
             n_end_q    = end_rel[5:3] == 3'd1;
             n_end_lane = end_rel[2:0];
             n_ls       = end_rel[2:0] + 3'd1;      // wraps to 0 when the block ends in lane 7
-            n_a        = end_rel[2:0] + 3'd2;
             n_blk_len  = len_val[5:0];
-            n_rel      = 6'd57 - len_val[5:0] + {3'b000, end_rel[2:0]};
-            n_len_full = len_val;
-            n_len_chk  = 1'b1;
+            n_rel      = cand_rel[sel];
+            n_len_bad  = cand_bad[sel];
         end
     end
 
@@ -213,7 +223,7 @@ module moldudp64_framer #(
         if (rst) begin
             hb <= '0; st <= ST_HDR; in_blk <= 1'b0; len_pend <= 1'b0;
             ps_valid <= 1'b0; remaining <= '0; seq <= '0; pkt_err <= 1'b0;
-            len_chk_q <= 1'b0; end_q <= 1'b0;
+            len_bad_q <= 1'b0; end_q <= 1'b0;
         end else if (in_fire) begin
             for (int i = 6; i > 0; i--) hist[i] <= hist[i-1];
             hist[0] <= s_tdata;
@@ -233,7 +243,7 @@ module moldudp64_framer #(
                 pkt_err  <= (st == ST_ERR) || err || n_st == ST_HDR || n_in_blk
                             || n_len_pend || n_ps_valid || n_remaining != 16'd0;
                 hb <= '0; st <= ST_HDR; in_blk <= 1'b0; len_pend <= 1'b0;
-                ps_valid <= 1'b0; remaining <= '0; len_chk_q <= 1'b0; end_q <= 1'b0;
+                ps_valid <= 1'b0; remaining <= '0; len_bad_q <= 1'b0; end_q <= 1'b0;
             end else begin
                 if (hb != 2'd3) hb <= hb + 2'd1;
                 // After an error only `st` matters: ST_ERR ignores the rest of
@@ -242,9 +252,9 @@ module moldudp64_framer #(
                 // enable path.
                 st <= (st == ST_ERR || err) ? ST_ERR : n_st;
                 in_blk <= n_in_blk; len_pend <= n_len_pend; len_hi <= n_len_hi;
-                bl <= n_bl; end_q <= n_end_q; end_lane <= n_end_lane; ls_q <= n_ls; a_q <= n_a;
+                bl <= n_bl; end_q <= n_end_q; end_lane <= n_end_lane; ls_q <= n_ls;
                 blk_len <= n_blk_len; rel <= n_rel; more <= n_more; ps_valid <= n_ps_valid;
-                remaining <= n_remaining; len_full_q <= n_len_full; len_chk_q <= n_len_chk;
+                remaining <= n_remaining; len_bad_q <= n_len_bad;
             end
         end
     end

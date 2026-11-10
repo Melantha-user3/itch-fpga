@@ -4,9 +4,9 @@ Info: 	          TRELLIS_IO:    93/  197    47%
 Info: 	              DP16KD:     0/   56     0%
 Info: 	          MULT18X18D:     0/   28     0%
 --
-Info: 	          TRELLIS_FF:  1719/24288     7%
-Info: 	        TRELLIS_COMB:  4279/24288    17%
+Info: 	          TRELLIS_FF:  1707/24288     7%
+Info: 	        TRELLIS_COMB:  4476/24288    18%
 --
-Info: Max frequency for clock '$glbnet$clk$TRELLIS_IO_IN': 75.02 MHz (FAIL at 250.00 MHz)
+Info: Max frequency for clock '$glbnet$clk$TRELLIS_IO_IN': 65.98 MHz (FAIL at 250.00 MHz)
 --
-Warning: Max frequency for clock '$glbnet$clk$TRELLIS_IO_IN': 89.87 MHz (FAIL at 250.00 MHz)
+Warning: Max frequency for clock '$glbnet$clk$TRELLIS_IO_IN': 97.12 MHz (FAIL at 250.00 MHz)
