@@ -152,6 +152,43 @@ def parse_frame(frame, udp_port, max_msg=50):
     return out, "ok"
 
 
+# ---------------------------------------------------------------- real data
+
+def read_itch_file(path, max_msgs=None):
+    """Messages from a Nasdaq sample file (e.g. 01302019.NASDAQ_ITCH50, gunzipped).
+
+    The file is a plain stream of [2-byte big-endian length][message] blocks,
+    the same block format MoldUDP64 carries. A cut-off block at the end is
+    ignored.
+    """
+    with open(path, "rb") as fh:
+        data = fh.read()
+    msgs, pos = [], 0
+    while pos + 2 <= len(data) and (max_msgs is None or len(msgs) < max_msgs):
+        n, = struct.unpack_from(">H", data, pos)
+        if pos + 2 + n > len(data):
+            break
+        msgs.append(data[pos + 2:pos + 2 + n])
+        pos += 2 + n
+    return msgs
+
+
+def packetize(msgs, first_seq, max_payload=1472):
+    """Pack messages into MoldUDP64 packets that fit a 1500-byte MTU
+    (1500 - 20 IPv4 - 8 UDP = 1472 bytes of UDP payload)."""
+    frames, batch, size, seq = [], [], 20, first_seq
+    for m in msgs:
+        if batch and size + 2 + len(m) > max_payload:
+            frames.append(build_mold(seq, batch))
+            seq += len(batch)
+            batch, size = [], 20
+        batch.append(m)
+        size += 2 + len(m)
+    if batch:
+        frames.append(build_mold(seq, batch))
+    return frames
+
+
 # ---------------------------------------------------------------- AXI-Stream
 
 def to_beats(frame):

@@ -36,6 +36,8 @@ class Harness:
         self.pkt_done = 0
         self.pkt_err = 0
         self.pkt_drop = 0
+        self.expect = None     # optional iterator: check outputs as they come, keep none
+        self.checked = 0
 
     async def start(self):
         dut = self.dut
@@ -61,7 +63,13 @@ class Harness:
                 if not all(v.is_resolvable for v in raw.values()):
                     raise AssertionError(f"X/Z on output at cycle {self.cycle}: {raw}")
                 rec = {f: int(v) for f, v in raw.items()}
-                self.outputs.append((self.cycle, rec))
+                if self.expect is None:
+                    self.outputs.append((self.cycle, rec))
+                else:
+                    e = next(self.expect, None)
+                    if rec != e:
+                        raise AssertionError(f"message {self.checked} mismatch: got {rec}, expected {e}")
+                    self.checked += 1
             self.pkt_done += int(dut.stat_pkt_done.value)
             self.pkt_err += int(dut.stat_pkt_done.value) & int(dut.stat_pkt_err.value)
             self.pkt_drop += int(dut.stat_pkt_drop.value)
@@ -289,3 +297,41 @@ async def test_every_alignment(dut):
     await h.drain()
     check(h, exp)
     assert h.pkt_done == len(frames) and h.pkt_err == 0
+
+
+ITCH_FILE = os.environ.get("ITCH_FILE")
+
+
+@cocotb.test(skip=not ITCH_FILE)
+async def test_real_nasdaq_replay(dut):
+    """Replay real Nasdaq messages (sample day file, see model/fetch_nasdaq_sample.sh),
+    packed into MTU-sized MoldUDP64 packets. Run with ITCH_FILE=<path> [NUM_REAL=n]."""
+    from collections import Counter
+    from itch_model import decode_message, packetize, read_itch_file
+    h = Harness(dut)
+    await h.start()
+    msgs = read_itch_file(ITCH_FILE, int(os.environ.get("NUM_REAL", "100000")))
+    frames = [build_frame(p, PORT) for p in packetize(msgs, 1)]
+
+    def expected():
+        # Reference parser on the same frames, one frame at a time; it must
+        # get back exactly the messages that were packed
+        i = 0
+        for f in frames:
+            got, status = parse_frame(f, PORT)
+            assert status == "ok"
+            for e in got:
+                assert e == decode_message(1 + i, msgs[i])
+                i += 1
+                yield e
+
+    h.expect = expected()
+    await h.send(frames)
+    await h.drain()
+    assert h.checked == len(msgs), f"checked {h.checked} of {len(msgs)} messages"
+    assert next(h.expect, None) is None
+    assert h.pkt_done == len(frames) and h.pkt_err == 0
+    types = Counter(chr(m[0]) for m in msgs)
+    known = sum(types[t] for t in "AFECXDU")
+    dut._log.info(f"real data: {len(frames)} packets, {len(msgs)} messages "
+                  f"({known} order messages) all match; types {dict(types.most_common())}")
