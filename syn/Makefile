@@ -22,7 +22,12 @@ pnr.log: syn.json
 report.txt: pnr.log
 	@grep -E "Max frequency for clock|Info:\s+(TRELLIS_COMB|TRELLIS_FF|TRELLIS_IO|DP16KD|MULT18X18D|CCU2C|LUT4):|Device utilisation" -A0 pnr.log | tee $@
 
-clean:
-	rm -f syn.json pnr.log pnr_report.json yosys.log report.txt
+# Resource use per module (hierarchy kept, so totals differ slightly from report.txt)
+area: $(RTL)
+	yosys -q -p "read_verilog -sv $(RTL); synth_ecp5 -top syn_wrapper -noflatten; tee -q -o area.txt stat"
+	@grep -E "^=== |LUT4 |CCU2C |TRELLIS_FF " area.txt
 
-.PHONY: all clean
+clean:
+	rm -f syn.json pnr.log pnr_report.json yosys.log report.txt area.txt
+
+.PHONY: all area clean

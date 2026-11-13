@@ -25,6 +25,24 @@ def now_cycle():
     """Index of the current clock edge (from simulation time, so every coroutine agrees)."""
     return round(get_sim_time(unit="ns") / CLK_NS)
 SEED = int(os.environ.get("SEED", "12345"))
+# DONT_CARE=1: for decoders that do not zero the fields a message type lacks
+# (see rtl/experiments/), compare only the fields the type defines.
+DONT_CARE = os.environ.get("DONT_CARE", "0") == "1"
+COMMON = {"known", "seq", "type", "locate", "tracking", "timestamp"}
+TYPE_FIELDS = {
+    ord("A"): {"order_ref", "side", "shares", "stock", "price"},
+    ord("F"): {"order_ref", "side", "shares", "stock", "price", "attribution"},
+    ord("E"): {"order_ref", "shares", "match"},
+    ord("C"): {"order_ref", "shares", "match", "printable", "price"},
+    ord("X"): {"order_ref", "shares"},
+    ord("D"): {"order_ref"},
+    ord("U"): {"order_ref", "new_order_ref", "shares", "price"},
+}
+
+
+def mask_unused(rec):
+    keep = COMMON | (TYPE_FIELDS.get(rec["type"], set()) if rec["known"] else set())
+    return {f: (v if f in keep else 0) for f, v in rec.items()}
 
 
 class Harness:
@@ -63,6 +81,8 @@ class Harness:
                 if not all(v.is_resolvable for v in raw.values()):
                     raise AssertionError(f"X/Z on output at cycle {self.cycle}: {raw}")
                 rec = {f: int(v) for f, v in raw.items()}
+                if DONT_CARE:
+                    rec = mask_unused(rec)
                 if self.expect is None:
                     self.outputs.append((self.cycle, rec))
                 else:

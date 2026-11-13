@@ -7,3 +7,10 @@ tb/*.vcd
 tb/latency.txt
 syn/*.json
 syn/*.log
+build/
+analysis/itch_stats
+analysis/queue_sim
+analysis/window_dump
+analysis/book_size
+syn/area.txt
+analysis/extract_window

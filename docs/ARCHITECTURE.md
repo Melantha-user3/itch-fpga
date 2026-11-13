@@ -68,6 +68,14 @@ from fixed big-endian offsets.
 Line rate at 97 MHz × 64 bits ≈ 6.2 Gb/s: enough for 1GbE, not for 10GbE
 (156.25 MHz at 64 bits, or a 128-bit datapath at ~80 MHz).
 
+What that gap costs was measured on Nasdaq's full sample day (368 million
+messages) with a model in `analysis/queue_sim.c`: messages go out on a 10 GbE
+link as soon as they are ready, and each message's last beat waits for the
+slower parser. At 97.1 MHz the median wait is 49 ns, the 99.9th percentile
+342 ns and the worst 11.4 µs (a burst of 682 messages, 22.5 KB, within
+0.44 µs of exchange time). At 156.25 MHz the wait is at most 6 ns. Average
+load is low (busiest second: 23 MB, 3 % of capacity); bursts are the issue.
+
 ## 5. Design trade-offs
 
 | Decision | Chosen | Alternative and why not |
@@ -78,9 +86,26 @@ Line rate at 97 MHz × 64 bits ≈ 6.2 Gb/s: enough for 1GbE, not for 10GbE
 | Backpressure | None inside the parser | A consumer of market data cannot slow the exchange down; buffering would only add latency. |
 | Decoder output | Registered | Combinational output saves a cycle but hands a long path to whatever consumes the fields. |
 
-Current critical path: framer output → `known` (type and length match) in
-the decoder → enable of ~370 output registers. Computing `known` a stage
-earlier would raise Fmax at the cost of one more cycle of latency.
+Critical paths: nextpnr reports the decoder's `known` (type and length
+match) clearing ~370 output registers, 10.3 ns. Removing it does not help,
+because two framer paths are at nearly the same delay: the per-beat loop
+(length → per-lane adders → offset → `rel`, ~10.4 ns) and the message shifter
+(`rel` → 64-byte shift → message register, ~10.1 ns). All three are 60–80 %
+routing. Measured variants (`rtl/experiments/`, seeds 1–3):
+
+| Variant | Fmax (MHz) | LUT4 | Latency |
+|---|---|---|---|
+| v4 | 97.1 / 93.1 / 98.1 | 4,476 | 2–3 |
+| A: decoder does not zero absent fields | 95.4 / 98.8 / 95.8 | 4,050 | 2–3 |
+| B: extra stage before the decoder | 105.0 / 99.7 / 99.0 | 4,096 | 3–4 |
+| C: framer offset with one adder less | 95.6 / 86.0 / 96.6 | 4,356 | 2–3 |
+| A + C | 102.6 / 98.6 / 97.1 | 3,915 | 2–3 |
+
+B gives a faster clock but a slower message (4 cycles × 9.5 ns > 3 × 10.3 ns).
+A + C is about 4 % faster on average, within placement noise, and gives up
+the zeroed-field contract. None is adopted: on this device the design is
+balanced at ~100 MHz, and the next step is structural (wider datapath or a
+faster device), not another local fix.
 
 ## 6. Verification
 
@@ -91,11 +116,19 @@ earlier would raise Fmax at the cost of one more cycle of latency.
   random `tvalid` gaps, header filtering, malformed MoldUDP64 recovery,
   heartbeats and padding, latency/throughput at full rate, and every pair of
   the 23 message types back to back so blocks start and end in every lane.
-- `test_real_nasdaq_replay`: 2,753,971 messages from Nasdaq's public sample
-  day (2019-01-30, first 80 MB, pre-market), packed into MTU-sized MoldUDP64
-  packets: all match. Details in the README.
+- `test_real_nasdaq_replay`: messages from Nasdaq's public sample day
+  (2019-01-30), packed into MTU-sized MoldUDP64 packets. Two windows: the
+  first 80 MB (2,753,971 messages, pre-market) and 14:46–14:47 ET, the minute
+  with the day's worst burst (1,311,669 messages, including `C` and 50-byte
+  `I` messages). All match. Details in the README.
+- `DONT_CARE=1` makes the testbench ignore the fields a message type does not
+  have, for decoder variants that do not zero them (variant A).
 
 ## 7. Assumptions and limits
 
-FCS removed upstream; IPv4 without options; no fragments; no sequence-gap
-detection or retransmission; no order book; not yet run on a board.
+FCS removed upstream; IPv4 without options; no fragments; no VLAN tag; no
+sequence-gap detection or retransmission; no order book; not yet run on a
+board; slower than 10 GbE line rate. The README lists each limit with what
+breaks and how it was found, and the next steps in priority order. An order
+book for the full day would need to hold 1.74 million live orders at peak
+(~33 MB), so it needs external memory.

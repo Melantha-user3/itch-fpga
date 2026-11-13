@@ -1,0 +1,5 @@
+orders added (A/F/U) 191919099
+peak live orders 1742866 at 15:57:46
+live at end of file 0
+busiest stock: locate 14 (AAPL    ), peak 42774 live orders
+references not found 0, duplicate adds 0

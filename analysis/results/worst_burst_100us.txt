@@ -1,0 +1,2 @@
+window (53189281843123, 53189281943123]: 802 msgs, 26105 bytes, ts span 99815 ns, 113 stock locates (top locate 14: 681 msgs)
+ A=52 D=55 E=685 F=1 P=2 U=5 X=2
