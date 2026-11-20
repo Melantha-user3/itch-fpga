@@ -217,6 +217,29 @@ reference parser. Two windows were replayed:
 | Other types | L 193,665 · R 8,714 · H 8,712 · Y 8,712 · P 397 · S 2 | P 4,800 · I 60 (50 bytes, the longest message) |
 | Icarus Verilog wall time | 36 minutes | 20 minutes |
 
+Quick try, about a minute: the first minute of pre-market trading
+(04:00:00–04:01:00 ET, 29,777 messages, 29,770 of them order messages). `SHOW=12`
+prints the first 12 orders as the hardware decoded them. Downloading takes a
+few seconds and the simulation 26 seconds on the machine used here. The
+download script stops after 80 MB, so a `curl: (23) Failure writing output`
+line at that point is expected.
+
+```
+cc -O2 -o analysis/extract_window analysis/extract_window.c
+model/fetch_nasdaq_sample.sh sample.itch
+analysis/extract_window 14400000000000 14460000000000 < sample.itch > open60s.itch
+cd tb && ITCH_FILE=../open60s.itch SHOW=12 make COCOTB_TEST_FILTER=test_real_nasdaq_replay
+```
+
+```
+hardware decoded: 04:00:00.000565835  A  add order 9005: sell 600 ARGX @ 107.2600
+hardware decoded: 04:00:00.001106902  A  add order 9245: buy  500 ASML @ 175.8400
+...
+real data: 627 packets, 29777 messages (29770 order messages) all match; types {'A': 14132, 'D': 10325, 'X': 4205, 'U': 1050, ...}
+```
+
+The two full windows:
+
 ```
 model/fetch_nasdaq_sample.sh /path/to/sample.itch     # streams only the first 80 MB
 cd tb && ITCH_FILE=/path/to/sample.itch NUM_REAL=3000000 make COCOTB_TEST_FILTER=test_real_nasdaq_replay

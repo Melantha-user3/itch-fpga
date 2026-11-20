@@ -15,5 +15,6 @@ analysis/book_size
 syn/area.txt
 analysis/extract_window
 analysis/sym_probe
+*.itch
 # local work that is not part of the project
 learn/

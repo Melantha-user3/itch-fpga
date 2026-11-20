@@ -28,6 +28,8 @@ SEED = int(os.environ.get("SEED", "12345"))
 # DONT_CARE=1: for decoders that do not zero the fields a message type lacks
 # (see rtl/experiments/), compare only the fields the type defines.
 DONT_CARE = os.environ.get("DONT_CARE", "0") == "1"
+# SHOW=n: print the first n order messages the hardware decoded, in plain words.
+SHOW = int(os.environ.get("SHOW", "0"))
 COMMON = {"known", "seq", "type", "locate", "tracking", "timestamp"}
 TYPE_FIELDS = {
     ord("A"): {"order_ref", "side", "shares", "stock", "price"},
@@ -38,6 +40,31 @@ TYPE_FIELDS = {
     ord("D"): {"order_ref"},
     ord("U"): {"order_ref", "new_order_ref", "shares", "price"},
 }
+
+
+def describe(rec):
+    """One decoded order message as a readable line (for SHOW=n)."""
+    t = chr(rec["type"])
+    ns = rec["timestamp"]
+    s = ns // 10**9
+    when = f"{s // 3600:02d}:{s // 60 % 60:02d}:{s % 60:02d}.{ns % 10**9:09d}"
+    stock = rec["stock"].to_bytes(8, "big").decode("ascii", "replace").strip()
+    px = rec["price"] / 1e4
+    ref = rec["order_ref"]
+    if t in "AF":
+        side = "buy " if rec["side"] == ord("B") else "sell"
+        what = f"add order {ref}: {side} {rec['shares']} {stock} @ {px:.4f}"
+    elif t == "E":
+        what = f"order {ref}: {rec['shares']} shares executed"
+    elif t == "C":
+        what = f"order {ref}: {rec['shares']} shares executed @ {px:.4f}"
+    elif t == "X":
+        what = f"order {ref}: {rec['shares']} shares cancelled"
+    elif t == "D":
+        what = f"order {ref}: deleted"
+    else:
+        what = f"order {ref} replaced by {rec['new_order_ref']}: {rec['shares']} @ {px:.4f}"
+    return f"{when}  {t}  {what}"
 
 
 def mask_unused(rec):
@@ -56,6 +83,7 @@ class Harness:
         self.pkt_drop = 0
         self.expect = None     # optional iterator: check outputs as they come, keep none
         self.checked = 0
+        self.shown = 0
 
     async def start(self):
         dut = self.dut
@@ -83,6 +111,9 @@ class Harness:
                 rec = {f: int(v) for f, v in raw.items()}
                 if DONT_CARE:
                     rec = mask_unused(rec)
+                if self.shown < SHOW and rec["known"]:
+                    dut._log.info("hardware decoded: " + describe(rec))
+                    self.shown += 1
                 if self.expect is None:
                     self.outputs.append((self.cycle, rec))
                 else:
