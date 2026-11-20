@@ -1,0 +1,5 @@
+orders added (A/F/U) 817233151
+peak live orders 6677709 at 15:58:50
+live at end of file 0
+busiest stock: locate 10536 (SPCX    ), peak 2307617 live orders
+references not found 0, duplicate adds 0

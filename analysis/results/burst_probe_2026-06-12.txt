@@ -1,0 +1,12 @@
+R 03:04:57.322284041 locate 10536 market Q fin N roundlot 100 class C subtype Z  ipo_flag Y etp N
+H 04:00:00.001238762 state H reason     
+K 07:00:05.436594494 stock SPCX     release 35400s qual A ipo_price 135.0000
+H 07:00:05.436788451 state H reason     
+Q 09:30:00.604549926 shares 0 price 0.0000 type O
+H 09:50:00.000123251 state Q reason IPOQ
+Q 11:46:45.910363820 shares 58206084 price 150.0000 type H
+H 11:46:45.910363820 state T reason     
+Q 16:00:00.072243504 shares 7846844 price 160.9500 type C
+symbol SPCX     locate 10536 messages by type: A=8810421 C=663185 D=6812374 E=1675754 F=40169 H=4 I=7473 L=55 P=759256 Q=3 R=1 U=790018 X=21429 Y=1
+window (55939938792178,55939938793178]: 27928 msgs: E=27928
+window top symbols: SPCX    =27928

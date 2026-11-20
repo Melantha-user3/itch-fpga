@@ -14,5 +14,6 @@ analysis/window_dump
 analysis/book_size
 syn/area.txt
 analysis/extract_window
+analysis/sym_probe
 # local work that is not part of the project
 learn/

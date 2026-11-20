@@ -1,0 +1,5 @@
+orders added (A/F/U) 519832076
+peak live orders 5244341 at 15:58:50
+live at end of file 0
+busiest stock: locate 7708 (NVDA    ), peak 216489 live orders
+references not found 0, duplicate adds 0

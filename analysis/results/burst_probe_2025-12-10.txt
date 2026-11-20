@@ -1,0 +1,10 @@
+R 03:04:57.744580756 locate 7443 market Q fin N roundlot 10 class C subtype Z  ipo_flag N etp N
+H 03:04:57.900548883 state T reason     
+K 08:02:04.759393257 stock CDNL     release 38100s qual A ipo_price 21.0000
+K 08:25:31.509359160 stock IALT     release 34200s qual A ipo_price 25.0000
+K 08:45:57.509425215 stock MESHU    release 36600s qual A ipo_price 10.0000
+Q 09:30:00.878226027 shares 437591 price 96.7100 type O
+Q 16:00:00.216388840 shares 6322314 price 92.7100 type C
+symbol NFLX     locate 7443 messages by type: A=772051 C=11564 D=601399 E=191649 F=2288 H=1 I=529 L=47 P=49790 Q=2 R=1 U=503791 X=41547 Y=1
+window (38317273155756,38317273156756]: 4108 msgs: E=4076 P=32
+window top symbols: NFLX    =4108

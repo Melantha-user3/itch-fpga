@@ -18,7 +18,8 @@ Ethernet frame          UDP payload             one message             decoded 
 fields, about 97 MHz on the slowest ECP5, zero mismatches on 4.07 million real
 messages. Its main limit: at 97 MHz × 64 bits it parses 6.2 Gb/s, slower than
 a 10 GbE link. On a real day that adds about 50 ns to a typical message and
-up to 11.4 µs during the worst burst (a model, see below). Three different
+up to 11.4 µs during the worst burst (a model, see below). On newer days the
+cost grows: up to 467 µs on 2026-06-12, SpaceX's first trading day. Three different
 paths all sit at about 10 ns, so fixing any one of them alone does not help
 (tried and measured, see Tuning experiments).
 
@@ -114,6 +115,45 @@ message. In a full 1,514-byte frame the last message would wait about
 0.74 µs (190 beats take 1.95 µs to parse, 1.22 µs to arrive). On a 1 GbE link
 nothing waits: the parser (6.2 Gb/s) is faster than the wire.
 
+### Three days, 2019 to 2026
+
+The same C tools on two newer Nasdaq sample days (`analysis/run_trend.sh`,
+results in `analysis/results/*_2025-12-10.txt` and `*_2026-06-12.txt`). The
+RTL has not been run on these days. One day per year shows a direction, not a
+statistic.
+
+| | 2019-01-30 | 2025-12-10 | 2026-06-12 |
+|---|---|---|---|
+| Messages | 368 M | 847 M | 1,305 M |
+| Busiest second (all at the close) | 23.1 MB, 3 % of 777 MB/s | 37.7 MB, 5 % | 40.7 MB, 5 % |
+| Worst 1 µs burst | 682 msgs, 22.5 KB | 4,108 msgs, 136 KB | 27,928 msgs, 922 KB |
+| Its stock | AAPL: 679 executions | NFLX: 4,076 executions + 32 hidden-order trades | SPCX: 27,928 executions |
+| 10 GbE wait at 97.1 MHz: 99.99 % / worst | 1.4 µs / 11.4 µs | 1.7 µs / 69 µs | 35 µs / 467 µs |
+| 10 GbE wait at 156.25 MHz: worst | 6 ns | 6 ns | 6 ns |
+| Peak live orders | 1.74 M | 5.24 M | 6.68 M |
+| Largest single-stock book | AAPL 42,774 | NVDA 216,489 | SPCX 2,307,617 |
+
+2026-06-12 was SpaceX's first trading day, and the feed itself shows it
+(`burst_probe_2026-06-12.txt`): SPCX's stock-directory entry has the IPO flag
+set, an IPO quoting message at 07:00 gives a $135 IPO price, the IPO cross at
+11:46:45 matched 58,206,084 shares at $150, and the closing cross was at
+$160.95. SPCX was only 19.6 M of that day's messages, so the growth in volume
+is not that one stock.
+
+What this changes:
+
+- **Bursts grow much faster than volume.** Volume grew 3.5× from 2019 to
+  2026. The worst burst grew 6× from 2019 to 2025 and another 7× on
+  the IPO day. Each worst burst is one stock's executions within a
+  microsecond, which fits one large order taking out hundreds to tens of
+  thousands of resting orders (an inference: ITCH does not say who traded).
+- **The 10 GbE gap now costs up to half a millisecond.** On the IPO day it is
+  not one event: 0.01 % of messages (at least 130,000) waited 35 µs or more,
+  more than one 28,000-message burst can account for. At 156.25 MHz every
+  wait stays at 6 ns or less.
+- **The order book is further from fitting on chip.** 6.68 M live orders is
+  about 127 MB at 19 bytes each; one stock alone reached 2.3 M (about 44 MB).
+
 ## Limitations
 
 Each item says what breaks and how I know.
@@ -150,15 +190,15 @@ In order of what the measurements say matters most:
    at ≥ 78 MHz plus margin, where up to two messages can end per beat (the
    smallest block is 14 bytes) and the framer needs two extraction ports.
    Success criterion: the 10 GbE model shows ~0 waiting, as in the 156.25 MHz
-   row.
+   row, on all three days including the 2026-06-12 IPO-day burst.
 2. **Sequence-gap detection.** One 64-bit compare per packet against the
    expected sequence number, plus a gap flag. Small, and it is about
    correctness, not speed.
 3. **Order book.** The day peaks at 1.74 million live orders; at ~19 bytes per
    order (reference 8, shares 4, price 4, locate 2, side 1) that is ~33 MB,
    so it needs external memory. Even AAPL alone (42,774 orders, ~0.8 MB) is
-   6× the 126 KB of block RAM in this ECP5-25F. That decides the hardware
-   before the design.
+   6× the 126 KB of block RAM in this ECP5-25F. On 2026-06-12 the peak is
+   6.68 million (~127 MB). That decides the hardware before the design.
 4. **Board bring-up.** Replace the Fmax estimate with a measurement and time
    wire-to-output latency with a hardware counter.
 
@@ -206,7 +246,7 @@ rtl/experiments/         tuning variants A, B, C (not used by default)
 model/itch_model.py      packet builder + independent reference parser
 tb/test_parser.py        cocotb tests
 syn/                     Yosys + nextpnr flow for ECP5; seeds.sh runs seeds 1-3
-analysis/                full-day traffic, 10 GbE waiting model, order-book size, window extract (C)
+analysis/                full-day traffic, 10 GbE waiting model, order-book size, window extract, symbol probe (C)
 docs/ARCHITECTURE.md     architecture, performance and trade-offs
 ```
 
@@ -224,5 +264,6 @@ cd syn && ./seeds.sh           # same with seeds 1-3; add DECODER=... / FRAMER=.
 cd syn && make area            # LUT4 / carry / FF per module (unflattened synthesis)
 cd tb  && make DECODER=../rtl/experiments/itch_decoder_nozero.sv DONT_CARE=1   # variant A
 cd analysis && ./run_full_day.sh   # streams the 4.8 GB sample day, ~6 minutes
+cd analysis && ./run_trend.sh      # the 2025-12-10 and 2026-06-12 days, each streamed twice, ~1-2 hours
 python3 model/itch_model.py    # golden-model self-check
 ```
